@@ -1,0 +1,203 @@
+package hft_fixed_pkg;
+    // Common finance arithmetic: signed Q16.16 by default.
+    // All model inputs/outputs in this library use the same binary point unless
+    // a module explicitly says that a signal is an integer count/tick value.
+    parameter int QW = 32;
+    parameter int QF = 16;
+    typedef logic signed [QW-1:0] q_t;
+    localparam q_t Q_ZERO = 32'sh00000000;
+    localparam q_t Q_ONE  = 32'sh00010000;
+    localparam q_t Q_TWO  = 32'sh00020000;
+    localparam q_t Q_HALF = 32'sh00008000;
+    localparam q_t Q_LN2  = 32'sh0000B172; // ln(2) * 65536
+    localparam q_t Q_PI   = 32'sh0003243F; // pi * 65536
+    localparam q_t Q_PI_2 = 32'sh00019220;
+    localparam q_t Q_PI_4 = 32'sh0000C910;
+    localparam q_t Q_INV_SQRT_2PI = 32'sh0000661F;
+
+    function automatic q_t sat64(input logic signed [63:0] x);
+        if (x > 64'sh000000007FFFFFFF)      sat64 = 32'sh7FFFFFFF;
+        else if (x < -64'sh0000000080000000) sat64 = 32'sh80000000;
+        else                                 sat64 = x[31:0];
+    endfunction
+
+    function automatic q_t q_from_int(input logic signed [31:0] x);
+        q_from_int = sat64($signed(x) <<< QF);
+    endfunction
+
+    function automatic logic signed [31:0] q_to_int(input q_t x);
+        q_to_int = x >>> QF;
+    endfunction
+
+    function automatic q_t q_div_ext(input logic signed [95:0] a, input logic signed [95:0] b);
+        logic signed [127:0] n;
+        begin
+            if (b==0) q_div_ext = (a<0) ? 32'sh80000000 : 32'sh7FFFFFFF;
+            else begin n = a <<< QF; q_div_ext = sat64(n / b); end
+        end
+    endfunction
+
+    function automatic q_t q_from_int64(input logic signed [63:0] x);
+        logic signed [95:0] n;
+        begin n = x <<< QF; q_from_int64 = sat64(n); end
+    endfunction
+
+    function automatic q_t q_add(input q_t a, input q_t b);
+        q_add = sat64($signed(a) + $signed(b));
+    endfunction
+
+    function automatic q_t q_sub(input q_t a, input q_t b);
+        q_sub = sat64($signed(a) - $signed(b));
+    endfunction
+
+
+    function automatic q_t q_min(input q_t a, input q_t b);
+        q_min = (a < b) ? a : b;
+    endfunction
+    function automatic q_t q_max(input q_t a, input q_t b);
+        q_max = (a > b) ? a : b;
+    endfunction
+
+    function automatic q_t q_neg(input q_t a);
+        q_neg = sat64(-$signed(a));
+    endfunction
+
+    function automatic q_t q_abs(input q_t a);
+        if (a < 0) q_abs = q_neg(a); else q_abs = a;
+    endfunction
+
+    function automatic q_t q_mul(input q_t a, input q_t b);
+        logic signed [63:0] p;
+        begin
+            p = $signed(a) * $signed(b);
+            q_mul = sat64(p >>> QF);
+        end
+    endfunction
+
+    // Fixed-point division. Synthesis may infer a divider; use the NR module
+    // when deterministic iterative reciprocal hardware is preferred.
+    function automatic q_t q_div(input q_t a, input q_t b);
+        logic signed [63:0] n;
+        begin
+            if (b == 0) q_div = (a < 0) ? 32'sh80000000 : 32'sh7FFFFFFF;
+            else begin
+                n = $signed(a) <<< QF;
+                q_div = sat64(n / $signed(b));
+            end
+        end
+    endfunction
+
+    // Positive logarithm using range reduction x = 2^e m, m in [1,2), then
+    // ln(m) = 2*(z + z^3/3 + z^5/5 + ...), z=(m-1)/(m+1).
+    function automatic q_t q_ln_pos(input q_t x);
+        integer i, p, e;
+        q_t m, z, z2, term, sum, denom;
+        begin
+            if (x <= 0) begin
+                q_ln_pos = 32'sh80000000;
+            end else begin
+                p = -1;
+                for (i=31; i>=0; i=i-1)
+                    if ((p == -1) && x[i]) p = i;
+                e = p - QF;
+                if (e >= 0) m = x >>> e; else m = x <<< (-e);
+                z = q_div(q_sub(m, Q_ONE), q_add(m, Q_ONE));
+                z2 = q_mul(z,z);
+                sum = z;
+                term = z;
+                denom = q_from_int(3); term = q_mul(term,z2); sum = q_add(sum,q_div(term,denom));
+                denom = q_from_int(5); term = q_mul(term,z2); sum = q_add(sum,q_div(term,denom));
+                denom = q_from_int(7); term = q_mul(term,z2); sum = q_add(sum,q_div(term,denom));
+                denom = q_from_int(9); term = q_mul(term,z2); sum = q_add(sum,q_div(term,denom));
+                denom = q_from_int(11); term = q_mul(term,z2); sum = q_add(sum,q_div(term,denom));
+                q_ln_pos = q_add(sum <<< 1, q_mul(q_from_int(e),Q_LN2));
+            end
+        end
+    endfunction
+
+    // exp(x) using x = n*ln2 + r, r near zero; polynomial on r and exact
+    // power-of-two scaling. Domain is deliberately bounded for fixed-point use.
+    function automatic q_t q_exp(input q_t x);
+        integer n;
+        q_t r, r2, r3, r4, r5, r6, p;
+        logic signed [63:0] scaled;
+        begin
+            if (x > 32'sh000B0000) begin
+                q_exp = 32'sh7FFFFFFF;
+            end else if (x < -32'sh000B0000) begin
+                q_exp = 0;
+            end else begin
+                if (x >= 0) n = (($signed(x) + (Q_LN2>>>1)) / Q_LN2);
+                else        n = (($signed(x) - (Q_LN2>>>1)) / Q_LN2);
+                r = q_sub(x, q_mul(q_from_int(n),Q_LN2));
+                r2=q_mul(r,r); r3=q_mul(r2,r); r4=q_mul(r3,r); r5=q_mul(r4,r); r6=q_mul(r5,r);
+                p = q_add(Q_ONE,r);
+                p = q_add(p, r2>>>1);
+                p = q_add(p, q_div(r3,q_from_int(6)));
+                p = q_add(p, q_div(r4,q_from_int(24)));
+                p = q_add(p, q_div(r5,q_from_int(120)));
+                p = q_add(p, q_div(r6,q_from_int(720)));
+                if (n >= 0) begin
+                    if (n > 14) q_exp = 32'sh7FFFFFFF;
+                    else begin scaled = $signed(p) <<< n; q_exp = sat64(scaled); end
+                end else begin
+                    if (n < -15) q_exp = 0;
+                    else q_exp = p >>> (-n);
+                end
+            end
+        end
+    endfunction
+
+    function automatic q_t q_sqrt(input q_t x);
+        q_t y, y2, half;
+        integer k;
+        begin
+            if (x <= 0) begin
+                q_sqrt = 0;
+            end else begin
+                half = Q_HALF;
+                if (x > Q_ONE) y = x; else y = Q_ONE;
+                for (k=0;k<8;k=k+1) begin
+                    y2 = q_div(x,y);
+                    y = q_mul(half,q_add(y,y2));
+                end
+                q_sqrt = y;
+            end
+        end
+    endfunction
+
+    function automatic q_t q_sinh(input q_t x);
+        q_sinh = q_div(q_sub(q_exp(x),q_exp(q_neg(x))),Q_TWO);
+    endfunction
+
+    // Abramowitz-Stegun style rational approximation for the standard normal CDF.
+    function automatic q_t q_cdf(input q_t x);
+        q_t ax,t,t2,t3,t4,t5,poly,phi;
+        begin
+            ax=q_abs(x);
+            t=q_div(Q_ONE,q_add(Q_ONE,q_mul(32'sh00003B4D,ax))); // 0.2316419
+            t2=q_mul(t,t); t3=q_mul(t2,t); t4=q_mul(t3,t); t5=q_mul(t4,t);
+            poly = q_mul(32'sh000051C5,t)
+                 - q_mul(32'sh00005B47,t2)
+                 + q_mul(32'sh0001C8AE,t3)
+                 - q_mul(32'sh0001D20E,t4)
+                 + q_mul(32'sh000154D0,t5);
+            phi=q_mul(Q_INV_SQRT_2PI,q_exp(q_neg(q_mul(ax,ax))>>>1));
+            poly=q_sub(Q_ONE,q_mul(phi,poly));
+            q_cdf=(x<0)?q_sub(Q_ONE,poly):poly;
+        end
+    endfunction
+
+    function automatic q_t q_sigmoid(input q_t x);
+        q_sigmoid = q_div(Q_ONE,q_add(Q_ONE,q_exp(q_neg(x))));
+    endfunction
+
+    function automatic q_t q_tanh(input q_t x);
+        q_tanh = q_sub(q_mul(Q_TWO,q_sigmoid(q_mul(Q_TWO,x))),Q_ONE);
+    endfunction
+
+    function automatic q_t q_pow_pos(input q_t a, input q_t b);
+        if (a <= 0) q_pow_pos = 0;
+        else q_pow_pos = q_exp(q_mul(b,q_ln_pos(a)));
+    endfunction
+endpackage
