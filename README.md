@@ -1,11 +1,14 @@
 # FPGA HFT Trading System
 
- 10GbE → PHY/PCS → MAC → IPv4 → UDP/TCP → MoldUDP64 / SoupBinTCP → NASDAQ ITCH → Order Book → Quantitative RTL → Risk → OUCH → 10GbE
+```text
+10GbE → PHY/PCS → MAC → IPv4 → UDP/TCP → MoldUDP64 / SoupBinTCP → NASDAQ ITCH → Order Book → Quantitative RTL → Risk → OUCH → 10GbE
+```
 
 A modular FPGA-based High-Frequency Trading research platform implementing the complete **market-data-to-order datapath** in deterministic hardware. The architecture combines low-latency Ethernet processing, exchange-protocol decoding, hardware order-book reconstruction, market-microstructure analytics, quantitative trading models, FPGA-native arithmetic, deterministic risk controls, and order-entry processing.
 
 ## Architecture at a Glance
 
+```text
                     NASDAQ / MARKET VENUE
                             │
                             ▼
@@ -28,14 +31,14 @@ A modular FPGA-based High-Frequency Trading research platform implementing the c
                  ┌──────────────────────┐
                  │ CORE 2: PROTOCOL     │
                  │ MoldUDP64 / ITCH     │
-                 │ SoupBinTCP / OUCH   │
-                 │ GLIMPSE / Recovery  │
+                 │ SoupBinTCP / OUCH    │
+                 │ GLIMPSE / Recovery   │
                  └──────────┬───────────┘
                             ▼
                  ┌──────────────────────┐
                  │ CORE 3: MARKET STATE │
-                 │ L3 / L2 Order Book  │
-                 │ BBO / Queue / Depth │
+                 │ L3 / L2 Order Book   │
+                 │ BBO / Queue / Depth  │
                  └──────────┬───────────┘
                             ▼
                  ┌──────────────────────┐
@@ -48,16 +51,18 @@ A modular FPGA-based High-Frequency Trading research platform implementing the c
                             ▼
                        SIGNAL FUSION
                             ▼
-                      RISK ENGINE
+                       RISK ENGINE
                             ▼
-                         OUCH
+                          OUCH
                             ▼
-                     SoupBinTCP / TCP
+                    SoupBinTCP / TCP
                             ▼
                        IPv4 / MAC
                             ▼
                           10GbE
+```
 
+---
 
 # 1. Four Core Hardware Units
 
@@ -70,11 +75,13 @@ A modular FPGA-based High-Frequency Trading research platform implementing the c
 
 This separation keeps the **wire/protocol path independent from the trading model path**.
 
+---
 
 # 2. Core 1 — 10GbE Network Fabric
 
 ## Pipeline
 
+```text
 10GbE SFP+
     │
     ▼
@@ -109,12 +116,13 @@ IPv4
     ├───────────────┐
     ▼               ▼
    UDP              TCP
+```
 
 | Block     | Technology          | Optimization                       |
 | --------- | ------------------- | ---------------------------------- |
 | PHY       | 10GBASE-R           | Direct/high-speed SerDes interface |
 | PCS       | 64B/66B             | Parallel block processing          |
-| Scrambler | \(x^{58}+x^{39}+1\) | Combinational XOR network          |
+| Scrambler | $x^{58}+x^{39}+1$   | Combinational XOR network          |
 | XGMII     | 64-bit stream       | Wire-speed word processing         |
 | MAC       | Ethernet            | Cut-through frame processing       |
 | IPv4      | L3                  | Early header extraction            |
@@ -126,10 +134,13 @@ IPv4
 
 The network path uses **streaming and cut-through processing** wherever possible. Fixed header fields are extracted as soon as available instead of buffering complete packets before processing.
 
+---
+
 # 3. Core 2 — Exchange Protocol Fabric
 
 ## Market-Data Path
 
+```text
 UDP
  ↓
 MoldUDP64
@@ -143,9 +154,11 @@ ITCH 5.0 Parser
 Symbol Filter
  ↓
 Canonical Market Event
+```
 
 ## Session / Order Path
 
+```text
 TCP
  ↓
 SoupBinTCP
@@ -157,6 +170,8 @@ SoupBinTCP
        ├── GLIMPSE snapshot
        │
        └── OUCH order entry
+```
+
 ## Protocol Table
 
 | Protocol       | Transport         | Purpose                               |
@@ -184,6 +199,8 @@ NASDAQ's TotalView-ITCH feed and OUCH are designed for high-throughput market-da
 | `S` — System             | Feed/system state                         |
 
 ### Parser architecture
+
+```text
 64/128-bit packet window
         │
         ▼
@@ -197,12 +214,17 @@ message-specific decoder
         │
         ▼
 canonical_market_event
+```
 
 The architecture avoids carrying exchange-specific byte offsets into the strategy engine.
+
+---
 
 # 4. Core 3 — Market-State / Order Book Fabric
 
 The order book converts the event stream into deterministic market state.
+
+```text
                 ITCH EVENT
                     │
                     ▼
@@ -211,7 +233,7 @@ The order book converts the event stream into deterministic market state.
            ┌────────┴────────┐
            ▼                 ▼
       Order-ID Store    Price-Level Store
-       BRAM/CAM/Hash       BRAM/URAM
+     BRAM / CAM / Hash     BRAM / URAM
            │                 │
            └────────┬────────┘
                     ▼
@@ -219,11 +241,13 @@ The order book converts the event stream into deterministic market state.
                     │
           ┌─────────┼─────────┐
           ▼         ▼         ▼
-         BBO       L2       QUEUE
+         BBO        L2      QUEUE
           │         │         │
           └─────────┼─────────┘
                     ▼
               MARKET STATE
+```
+
 ## Memory architecture
 
 | Structure           | Typical FPGA Resource | Function                        |
@@ -231,12 +255,14 @@ The order book converts the event stream into deterministic market state.
 | Order-ID table      | BRAM / CAM / hash     | Fast order-reference lookup     |
 | Order records       | BRAM                  | Price, side, quantity, validity |
 | Price-level book    | BRAM / URAM           | Aggregated depth                |
-| Active-level bitmap | LUTRAM/BRAM           | Fast active-level detection     |
+| Active-level bitmap | LUTRAM / BRAM         | Fast active-level detection     |
 | BBO state           | Registers             | Best bid/ask                    |
-| Queue state         | Registers/BRAM        | Queue-ahead tracking            |
+| Queue state         | Registers / BRAM      | Queue-ahead tracking            |
 | CDC FIFO            | BRAM                  | Clock-domain crossing           |
 
 ### Order lifecycle
+
+```text
 ADD
  │
  ├── order lookup/allocation
@@ -263,22 +289,28 @@ REPLACE
  ├── remove old level contribution
  ├── invalidate old reference
  └── add replacement order
- 
+```
+
 ### BBO
 
+```text
 best_bid = highest active bid
 best_ask = lowest active ask
 
 spread = best_ask - best_bid
 
-mid = (best_bid + best_ask)/2
+mid = (best_bid + best_ask) / 2
+```
 
 For deeper books, hierarchical priority encoders and price-level bitmaps can replace linear scanning.
 
+---
 
 # 5. Core 4 — Quantitative Decision Fabric
 
 The quantitative engine consumes normalized market state rather than raw Ethernet packets.
+
+```text
                    MARKET STATE
                         │
           ┌─────────────┼─────────────┐
@@ -295,82 +327,90 @@ The quantitative engine consumes normalized market state rather than raw Etherne
              │          │          │
              └──────────┼──────────┘
                         ▼
-                 VOLATILITY
+                    VOLATILITY
                         │
           ┌─────────────┼─────────────┐
           ▼             ▼             ▼
-        EWMA           RV           GARCH
+        EWMA            RV          GARCH
           │             │             │
           └─────────────┼─────────────┘
                         ▼
-                 MODEL SELECT
+                   MODEL SELECT
                         │
        ┌────────────────┼─────────────────┐
        ▼                ▼                 ▼
-   MARKET MAKING    STAT-ARBITRAGE    ARBITRAGE
+  MARKET MAKING    STAT-ARBITRAGE      ARBITRAGE
        │                │                 │
-      A-S             OU/Kalman        Cross-Venue
-      GLFT            Cointegration       Basis
-       │                │               Triangular
+      A-S           OU / Kalman       Cross-Venue
+      GLFT          Cointegration        Basis
+       │                │              Triangular
        └────────────────┼─────────────────┘
                         ▼
-                      ML/RL
+                      ML / RL
                         │
                         ▼
                    SIGNAL FUSION
                         │
                         ▼
-                     RISK
+                       RISK
                         │
                         ▼
-                     OUCH
-                     
+                       OUCH
+```
+
+---
+
 # 6. Market-Microstructure Models
 
-| Model                 | Mathematical Definition           | FPGA Role              |
-| --------------------- | --------------------------------- | ---------------------- |
-| **OBI**               | \((Q_b-Q_a)/(Q_b+Q_a)\)           | Liquidity imbalance    |
-| **Multi-Level OBI**   | Weighted depth imbalance          | Deeper-book signal     |
-| **OFI**               | Incremental bid/ask queue changes | Order-flow pressure    |
-| **Integrated OFI**    | Windowed OFI                      | Short-horizon signal   |
-| **Microprice**        | \((P_aQ_b+P_bQ_a)/(Q_b+Q_a)\)     | Queue-aware fair value |
-| **Signed Flow**       | \(\epsilon_tV_t\)                 | Aggressor pressure     |
-| **VPIN/BVC**          | Volume-bucket imbalance           | Flow toxicity          |
-| **Kyle \(\lambda\)**  | \(\Delta P=\lambda q+\epsilon\)   | Price-impact estimate  |
-| **Adverse Selection** | Post-fill price movement          | Passive-order quality  |
-| **Queue Position**    | Quantity ahead                    | Fill probability       |
+| Model                 | Mathematical Definition                 | FPGA Role              |
+| --------------------- | --------------------------------------- | ---------------------- |
+| **OBI**               | $(Q_b-Q_a)/(Q_b+Q_a)$                   | Liquidity imbalance    |
+| **Multi-Level OBI**   | Weighted depth imbalance                | Deeper-book signal     |
+| **OFI**               | Incremental bid/ask queue changes       | Order-flow pressure    |
+| **Integrated OFI**    | Windowed OFI                            | Short-horizon signal   |
+| **Microprice**        | $(P_aQ_b+P_bQ_a)/(Q_b+Q_a)$             | Queue-aware fair value |
+| **Signed Flow**       | $\epsilon_tV_t$                         | Aggressor pressure     |
+| **VPIN/BVC**          | Volume-bucket imbalance                 | Flow toxicity          |
+| **Kyle $\lambda$**    | $\Delta P=\lambda q+\epsilon$           | Price-impact estimate  |
+| **Adverse Selection** | Post-fill price movement                | Passive-order quality  |
+| **Queue Position**    | Quantity ahead                          | Fill probability       |
 
+---
 
 # 7. Stochastic Order-Flow Models
 
-| Model               | Core Mathematics                             | RTL Implementation          |
-| ------------------- | -------------------------------------------- | --------------------------- |
-| Poisson             | \(N_T\sim Poisson(\lambda T)\)               | Intensity/state accumulator |
-| Exponential arrival | \(P(\tau>t)=e^{-\lambda t}\)                 | EXP core                    |
-| Hawkes              | \(\lambda_i=\mu_i+\sum_j\int\phi_{ij}dN_j\)  | Stateful excitation         |
-| Exponential Hawkes  | \(\phi_{ij}(t)=\alpha_{ij}e^{-\beta_{ij}t}\) | Decay + excitation          |
-| Hawkes 2D           | Buy/sell coupling                            | 2-state parallel engine     |
-| Hawkes 4D           | MO/LO event coupling                         | 4-state excitation matrix   |
-| Queue-Reactive      | State-dependent intensity                    | Calibrated ROM              |
+| Model               | Core Mathematics                              | RTL Implementation          |
+| ------------------- | --------------------------------------------- | --------------------------- |
+| Poisson             | $N_T\sim Poisson(\lambda T)$                  | Intensity/state accumulator |
+| Exponential arrival | $P(\tau>t)=e^{-\lambda t}$                    | EXP core                    |
+| Hawkes              | $\lambda_i=\mu_i+\sum_j\int\phi_{ij}dN_j$     | Stateful excitation         |
+| Exponential Hawkes  | $\phi_{ij}(t)=\alpha_{ij}e^{-\beta_{ij}t}$    | Decay + excitation          |
+| Hawkes 2D           | Buy/sell coupling                             | 2-state parallel engine     |
+| Hawkes 4D           | MO/LO event coupling                          | 4-state excitation matrix   |
+| Queue-Reactive      | State-dependent intensity                     | Calibrated ROM              |
 
+---
 
 # 8. Volatility / Time-Series Models
 
-| Model               | Equation / Function                                       |     |   |         |   |
-| ------------------- | --------------------------------------------------------- | --- | - | ------- | - |
-| Realized Variance   | \(RV=\sum r_i^2\)                                         |     |   |         |   |
-| Realized Volatility | \(\sigma=\sqrt{RV}\)                                      |     |   |         |   |
-| EWMA                | \(\sigma_t^2=\lambda\sigma_{t-1}^2+(1-\lambda)r_{t-1}^2\) |     |   |         |   |
-| Bipower Variation   | (\frac{\pi}{2}\sum                                        | r_i |   | r_{i-1} | ) |
-| GARCH(1,1)          | \(\omega+\alpha r_{t-1}^2+\beta\sigma_{t-1}^2\)           |     |   |         |   |
-| AR(p)               | \(c+\sum\phi_iX_{t-i}\)                                   |     |   |         |   |
-| MA(q)               | Weighted error history                                    |     |   |         |   |
-| ARIMA               | Differencing + AR/MA                                      |     |   |         |   |
-| VAR                 | Vector autoregression                                     |     |   |         |   |
-| CUSUM               | Online regime/change detection                            |     |   |         |   |
+| Model               | Equation / Function                                             |
+| ------------------- | --------------------------------------------------------------- |
+| Realized Variance   | $RV=\sum r_i^2$                                                 |
+| Realized Volatility | $\sigma=\sqrt{RV}$                                              |
+| EWMA                | $\sigma_t^2=\lambda\sigma_{t-1}^2+(1-\lambda)r_{t-1}^2$         |
+| Bipower Variation   | $\frac{\pi}{2}\sum \lvert r_i\rvert\,\lvert r_{i-1}\rvert$      |
+| GARCH(1,1)          | $\sigma_t^2=\omega+\alpha r_{t-1}^2+\beta\sigma_{t-1}^2$        |
+| AR(p)               | $c+\sum\phi_iX_{t-i}$                                           |
+| MA(q)               | Weighted error history                                          |
+| ARIMA               | Differencing + AR/MA                                            |
+| VAR                 | Vector autoregression                                           |
+| CUSUM               | Online regime/change detection                                  |
 
+---
 
 # 9. Statistical-Arbitrage Models
+
+```text
 Price A ─────┐
              ├──► OLS / Kalman ─► Hedge Ratio
 Price B ─────┘                         │
@@ -379,7 +419,7 @@ Price B ─────┘                         │
                                        │
                 ┌──────────────────────┼─────────────────────┐
                 ▼                      ▼                     ▼
-             ADF / EG                OU                 Johansen
+             ADF / EG                 OU                  Johansen
                 │                      │                     │
                 └──────────────────────┼─────────────────────┘
                                        ▼
@@ -387,26 +427,30 @@ Price B ─────┘                         │
                                        │
                                        ▼
                                   Trade Signal
-                                  
-| Model              | Purpose                          |
-| ------------------ | -------------------------------- |
-| Rolling statistics | Mean / variance                  |
-| Z-score            | Mean-reversion distance          |
-| OLS                | Hedge ratio                      |
-| Engle-Granger      | Residual cointegration           |
-| ADF                | Stationarity test                |
-| Johansen           | Multivariate cointegration       |
-| VECM               | Error-correction dynamics        |
-| OU                 | Mean-reverting spread            |
-| OU MLE             | \(\kappa,\mu,\sigma\) estimation |
-| Half-life          | \(\ln 2/\kappa\)                 |
-| Kalman             | Dynamic hedge ratio              |
-| Lead-Lag           | Cross-asset predictive relation  |
+```
 
+| Model              | Purpose                            |
+| ------------------ | ---------------------------------- |
+| Rolling statistics | Mean / variance                    |
+| Z-score            | Mean-reversion distance            |
+| OLS                | Hedge ratio                        |
+| Engle-Granger      | Residual cointegration             |
+| ADF                | Stationarity test                  |
+| Johansen           | Multivariate cointegration         |
+| VECM               | Error-correction dynamics          |
+| OU                 | Mean-reverting spread              |
+| OU MLE             | $\kappa,\mu,\sigma$ estimation     |
+| Half-life          | $\ln 2/\kappa$                     |
+| Kalman             | Dynamic hedge ratio                |
+| Lead-Lag           | Cross-asset predictive relation    |
+
+---
 
 # 10. Market-Making Models
 
 ## Avellaneda-Stoikov
+
+```text
 mid + inventory + volatility + horizon
                   │
                   ▼
@@ -417,16 +461,19 @@ mid + inventory + volatility + horizon
              /         \
             ▼           ▼
           BID           ASK
+```
+
 Core equations:
 
-r = S - q*gamma*sigma²*tau
+```text
+r = S - q * gamma * sigma^2 * tau
 
-delta =
-    gamma*sigma²*tau
-  + (2/gamma)*ln(1 + gamma/kappa)
+delta = gamma * sigma^2 * tau
+      + (2 / gamma) * ln(1 + gamma / kappa)
 
-bid = r - delta/2
-ask = r + delta/2
+bid = r - delta / 2
+ask = r + delta / 2
+```
 
 | Model              | Purpose                          |
 | ------------------ | -------------------------------- |
@@ -438,6 +485,8 @@ ask = r + delta/2
 | Alpha-adjusted MM  | Incorporate predictive signal    |
 | Toxicity-aware MM  | VPIN/flow-dependent widening     |
 | Queue-aware MM     | Fill-quality-aware quoting       |
+
+---
 
 # 11. Execution / Routing
 
@@ -451,24 +500,29 @@ ask = r + delta/2
 
 Representative SOR cost:
 
-expected_cost =
-      price
-    + fee
-    - rebate
-    + slippage
-    + latency_penalty
-    
+```text
+expected_cost = price
+              + fee
+              - rebate
+              + slippage
+              + latency_penalty
+```
+
+---
+
 # 12. Arbitrage
 
 | Model             | Decision                                        |
 | ----------------- | ----------------------------------------------- |
-| Cross-Exchange    | \(Bid_B-Ask_A-cost>0\)                          |
+| Cross-Exchange    | $Bid_B-Ask_A-cost>0$                            |
 | Latency Arbitrage | Trade stale quote before information propagates |
 | Basis             | Futures − spot/basket − fair basis              |
-| Triangular        | \(R_{AB}R_{BC}R_{CA}>1\) after costs            |
+| Triangular        | $R_{AB}R_{BC}R_{CA}>1$ after costs             |
 | Lead-Lag          | Predict delayed venue/asset response            |
 
 Cross-venue execution must include **leg risk**, because the first hedge leg can fill while the second does not.
+
+---
 
 # 13. ML / RL
 
@@ -486,9 +540,10 @@ Cross-venue execution must include **leg risk**, because the first hedge leg can
 
 Typical HFT feature vector:
 
+```text
 OBI
 OFI
-microprice-mid
+microprice - mid
 spread
 signed flow
 trade intensity
@@ -496,12 +551,15 @@ volatility
 depth
 return
 queue state
+```
 
+---
 
 # 14. Shared Financial-Math Accelerator
 
 All models share common fixed-point primitives.
 
+```text
                  FINANCIAL MATH FABRIC
                           │
       ┌───────────────────┼────────────────────┐
@@ -509,7 +567,7 @@ All models share common fixed-point primitives.
  Reciprocal              Sqrt                 Log
       │                   │                    │
       ▼                   ▼                    ▼
- Newton-Raphson       Newton-Raphson     LUT / Polynomial
+ Newton-Raphson      Newton-Raphson     LUT / Polynomial
       │                   │                    │
       └───────────────────┼────────────────────┘
                           ▼
@@ -520,21 +578,27 @@ All models share common fixed-point primitives.
                           │
                           ▼
                     MAC / Matrix
+```
 
 Default representation:
 
+```text
 Signed Q16.16
+```
 
 Mathematical primitives are candidates for:
 
+```text
 LUT
 Piecewise polynomial
 Newton-Raphson
 Range-reduced approximation
-Iterative/CORDIC-style implementation
+Iterative / CORDIC-style implementation
+```
 
 The purpose is to measure:
 
+```text
 Numerical error
         ↔
 Latency
@@ -544,35 +608,40 @@ Fmax
 LUT / FF / DSP / BRAM
         ↔
 Trading-decision accuracy
+```
+
+---
 
 # 15. Deterministic Risk Fabric
 
 Every order passes hardware risk before entering the order-entry path.
 
-| Risk Check    | Example                     |           |              |
-| ------------- | --------------------------- | --------- | ------------ |
-| Position      | (                           | q         | \le q_{max}) |
-| Quantity      | \(Q\le Q_{max}\)            |           |              |
-| Notional      | (                           | QP        | \le N_{max}) |
-| Price Band    | (                           | P-P_{ref} | \le B)       |
-| Order Rate    | \(R\le R_{max}\)            |           |              |
-| Drawdown      | \(DD\le DD_{max}\)          |           |              |
-| Credit        | Available trading credit    |           |              |
-| Kill Switch   | Immediate order suppression |           |              |
-| Session State | Exchange session valid      |           |              |
+| Risk Check    | Example                           |
+| ------------- | --------------------------------- |
+| Position      | $\lvert q\rvert \le q_{max}$      |
+| Quantity      | $Q\le Q_{max}$                    |
+| Notional      | $\lvert QP\rvert \le N_{max}$     |
+| Price Band    | $\lvert P-P_{ref}\rvert \le B$    |
+| Order Rate    | $R\le R_{max}$                    |
+| Drawdown      | $DD\le DD_{max}$                  |
+| Credit        | Available trading credit          |
+| Kill Switch   | Immediate order suppression       |
+| Session State | Exchange session valid            |
 
-
+```text
 Position ──┐
 Quantity ──┤
 Notional ──┤
 Price ─────┤
-Rate ──────┤──► AND ─► ORDER APPROVED
+Rate ──────┼──► AND ─► ORDER APPROVED
 Credit ────┤
 Session ───┤
 Kill ──────┘
+```
 
 The risk layer is intentionally deterministic and independent of the alpha model.
 
+---
 
 # 16. Hardware Optimization
 
@@ -580,11 +649,15 @@ The project focuses on FPGA-specific optimization techniques rather than direct 
 
 ### Cut-through processing
 
+```text
 packet field available
         ↓
 process immediately
+```
 
 ### Deep pipelining
+
+Every stage is registered so that one new input can be accepted per clock cycle.
 
 ### BRAM / URAM-aware design
 
@@ -598,13 +671,18 @@ Financial MACs, regressions, neural layers and polynomial approximations can map
 
 Use the minimum precision that preserves:
 
+```text
 price tick
 strategy threshold
 risk threshold
 decision accuracy
+```
 
-# 19. Recommended Repository Layout
+---
 
+# 17. Recommended Repository Layout
+
+```text
 FPGA-HFT-Trading-System/
 │
 ├── rtl/
@@ -662,3 +740,6 @@ FPGA-HFT-Trading-System/
 ├── LICENSE
 ├── NOTICE.md
 └── README.md
+```
+
+[1]: https://www.nasdaqtrader.com/
